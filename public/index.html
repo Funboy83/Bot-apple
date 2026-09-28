@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bot Apple</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Bot Apple</h1>
+    <p class="muted">Watches Apple Store pickup stock and buys it for you.</p>
+  </div>
+  <div class="controls">
+    <span id="runState" class="pill">Stopped</span>
+    <button id="checkNow">Check stock now</button>
+    <button id="resume" hidden>Resume auto-checkout</button>
+    <button id="startStop" class="primary">Start bot</button>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main>
+  <section class="card" id="sec-targets">
+    <h2>1. What to buy</h2>
+    <p class="muted">Top choice first. The bot buys the first one it finds in stock. Unlocked only. Leave part number blank and the bot finds it on apple.com.</p>
+    <table class="targets">
+      <thead><tr><th>#</th><th>Model</th><th>Storage</th><th>Color</th><th>Part number (optional)</th><th></th></tr></thead>
+      <tbody id="targets"></tbody>
+    </table>
+    <button id="addTarget">+ Add a backup choice</button>
+  </section>
+
+  <section class="card">
+    <h2>2. Store pickup</h2>
+    <div class="grid">
+      <label>Your ZIP code <input name="settings.pickup.zip" inputmode="numeric" maxlength="5" placeholder="95014"></label>
+      <label>Farthest store (miles) <input name="settings.pickup.maxDistanceMiles" type="number" min="1"></label>
+      <label class="wide">Only these stores (optional, store numbers like R033, comma separated)
+        <input name="settings.pickup.storeNumbers" placeholder="Any store near my ZIP"></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. Checking</h2>
+    <div class="grid">
+      <label>Check every (seconds) <input name="settings.check.intervalSec" type="number" min="20"></label>
+      <label>Plus random extra (seconds) <input name="settings.check.jitterSec" type="number" min="0"></label>
+      <label class="check wide"><input type="checkbox" name="settings.check.useBrowser"> Check stock in a real browser (turn on if Apple blocks the checks)</label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>4. Checkout</h2>
+    <fieldset class="modes">
+      <label class="check"><input type="radio" name="settings.checkout.mode" value="alert-only"> <b>Alert only.</b> Just tell me it's in stock.</label>
+      <label class="check"><input type="radio" name="settings.checkout.mode" value="stop-before-order"> <b>Stop before Place Order.</b> Fill everything in, then I press Place Order. Good for a first test.</label>
+      <label class="check"><input type="radio" name="settings.checkout.mode" value="full-auto"> <b>Buy fully automatically.</b> Press Place Order for me.</label>
+    </fieldset>
+    <div class="grid">
+      <label>Check out as
+        <select name="settings.checkout.account">
+          <option value="guest">Guest (no Apple ID)</option>
+          <option value="apple-id">My Apple ID (sign in once below)</option>
+        </select>
+      </label>
+      <label>Browser
+        <select name="settings.checkout.browser">
+          <option value="chrome">Google Chrome (recommended)</option>
+          <option value="chromium">Built-in Chromium</option>
+        </select>
+      </label>
+      <label>Stop after this many orders <input name="settings.checkout.maxOrders" type="number" min="1"></label>
+      <label class="check"><input type="checkbox" name="settings.checkout.headless"> Hide the browser window</label>
+      <label class="check"><input type="checkbox" name="settings.checkout.pickupBySomeoneElse"> Someone else will pick it up</label>
+    </div>
+    <p><button id="openBrowser">Open bot browser (to sign in to Apple ID)</button>
+      <span class="muted">Sign in once and approve the 2FA code. The bot reuses that sign-in. Your Apple ID password is never saved by the bot.</span></p>
+  </section>
+
+  <section class="card">
+    <h2>5. Alerts</h2>
+    <div class="grid">
+      <label class="check"><input type="checkbox" name="settings.alerts.telegram"> Telegram</label>
+      <label class="check"><input type="checkbox" name="settings.alerts.email"> Email</label>
+      <label class="check"><input type="checkbox" name="settings.alerts.sms"> Text message</label>
+      <label>Text by
+        <select name="settings.alerts.smsMethod">
+          <option value="twilio">Twilio</option>
+          <option value="gateway">Carrier email-to-text (free)</option>
+        </select>
+      </label>
+      <label>Repeat the same alert after (minutes) <input name="settings.alerts.repeatMinutes" type="number" min="1"></label>
+    </div>
+    <p class="muted">Logins for these go in Private details below.</p>
+  </section>
+
+  <p class="save-row"><button id="saveSettings" class="primary">Save settings</button> <span id="saveMsg" class="muted"></span></p>
+
+  <section class="card" id="vault">
+    <h2>6. Private details <span class="muted small">(encrypted on this computer)</span></h2>
+    <div id="vaultLocked">
+      <p class="muted" id="vaultHint"></p>
+      <div class="row">
+        <input id="passphrase" type="password" placeholder="Passphrase (6+ characters)" autocomplete="current-password">
+        <button id="unlock" class="primary">Unlock</button>
+        <button id="resetVault" class="danger" hidden>Forgot it? Erase details</button>
+      </div>
+    </div>
+    <div id="vaultOpen" hidden>
+      <h3>Your contact (receipt and texts from Apple)</h3>
+      <div class="grid">
+        <label>First name <input name="secrets.contact.firstName" autocomplete="off"></label>
+        <label>Last name <input name="secrets.contact.lastName" autocomplete="off"></label>
+        <label>Email <input name="secrets.contact.email" type="email" autocomplete="off"></label>
+        <label>Phone <input name="secrets.contact.phone" autocomplete="off"></label>
+      </div>
+      <h3>Pickup person <span class="muted small">(only if someone else picks it up)</span></h3>
+      <div class="grid">
+        <label>First name <input name="secrets.pickupPerson.firstName" autocomplete="off"></label>
+        <label>Last name <input name="secrets.pickupPerson.lastName" autocomplete="off"></label>
+        <label>Email <input name="secrets.pickupPerson.email" type="email" autocomplete="off"></label>
+        <label>Phone <input name="secrets.pickupPerson.phone" autocomplete="off"></label>
+      </div>
+      <h3>Card</h3>
+      <div class="grid">
+        <label class="wide">Card number <input name="secrets.card.number" autocomplete="off" inputmode="numeric"></label>
+        <label>Exp. month (MM) <input name="secrets.card.expMonth" maxlength="2" autocomplete="off"></label>
+        <label>Exp. year (YYYY) <input name="secrets.card.expYear" maxlength="4" autocomplete="off"></label>
+        <label>CVV <input name="secrets.card.cvv" maxlength="4" autocomplete="off"></label>
+        <label>Name on card <input name="secrets.card.nameOnCard" autocomplete="off"></label>
+      </div>
+      <h3>Billing address</h3>
+      <div class="grid">
+        <label>First name <input name="secrets.billing.firstName" autocomplete="off"></label>
+        <label>Last name <input name="secrets.billing.lastName" autocomplete="off"></label>
+        <label class="wide">Street <input name="secrets.billing.street" autocomplete="off"></label>
+        <label>Apt / suite <input name="secrets.billing.street2" autocomplete="off"></label>
+        <label>City <input name="secrets.billing.city" autocomplete="off"></label>
+        <label>State <input name="secrets.billing.state" placeholder="CA" autocomplete="off"></label>
+        <label>ZIP <input name="secrets.billing.zip" autocomplete="off"></label>
+        <label>Phone <input name="secrets.billing.phone" autocomplete="off"></label>
+      </div>
+      <h3>Telegram <button class="small-btn" data-test="telegram">Send test</button></h3>
+      <p class="muted small">Message @BotFather to create a bot and get its token. Send your bot a message, then open https://api.telegram.org/bot&lt;token&gt;/getUpdates to find your chat ID.</p>
+      <div class="grid">
+        <label class="wide">Bot token <input name="secrets.alerts.telegramToken" autocomplete="off"></label>
+        <label>Chat ID <input name="secrets.alerts.telegramChatId" autocomplete="off"></label>
+      </div>
+      <h3>Email <button class="small-btn" data-test="email">Send test</button></h3>
+      <p class="muted small">For Gmail use smtp.gmail.com, port 465, and an App Password (Google Account &gt; Security &gt; App passwords).</p>
+      <div class="grid">
+        <label>SMTP server <input name="secrets.alerts.smtpHost" placeholder="smtp.gmail.com" autocomplete="off"></label>
+        <label>Port <input name="secrets.alerts.smtpPort" autocomplete="off"></label>
+        <label>Username <input name="secrets.alerts.smtpUser" autocomplete="off"></label>
+        <label>Password / app password <input name="secrets.alerts.smtpPass" type="password" autocomplete="new-password"></label>
+        <label>From <input name="secrets.alerts.emailFrom" placeholder="same as username" autocomplete="off"></label>
+        <label>Send alerts to <input name="secrets.alerts.emailTo" placeholder="same as username" autocomplete="off"></label>
+      </div>
+      <h3>Text message <button class="small-btn" data-test="sms">Send test</button></h3>
+      <p class="muted small">Twilio: from twilio.com console. Free option: your carrier's email-to-text address (T-Mobile 5551234567@tmomail.net, Verizon @vtext.com, AT&amp;T @txt.att.net), sent through the email settings above.</p>
+      <div class="grid">
+        <label>Twilio Account SID <input name="secrets.alerts.twilioSid" autocomplete="off"></label>
+        <label>Twilio Auth Token <input name="secrets.alerts.twilioToken" type="password" autocomplete="new-password"></label>
+        <label>Twilio From number <input name="secrets.alerts.twilioFrom" placeholder="+15551234567" autocomplete="off"></label>
+        <label>Your phone <input name="secrets.alerts.smsTo" placeholder="+15551234567" autocomplete="off"></label>
+        <label class="wide">Or carrier email-to-text address <input name="secrets.alerts.smsGatewayEmail" autocomplete="off"></label>
+      </div>
+      <p class="save-row"><button id="saveSecrets" class="primary">Save private details</button>
+        <button id="lockVault">Lock</button> <span id="secretMsg" class="muted"></span></p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Stock</h2>
+    <p class="muted" id="lastCheck">Not checked yet.</p>
+    <table class="stock">
+      <thead><tr><th>Store</th><th>Miles</th><th>Part</th><th>Pickup</th></tr></thead>
+      <tbody id="stock"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Activity</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
