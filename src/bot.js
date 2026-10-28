@@ -1,9 +1,9 @@
 // The watch loop: check stock, alert, and hand off to checkout.
+import { withinCheckingHours } from './schedule.js';
 import { EventEmitter } from 'node:events';
 import { resolveParts, checkStock, httpGet } from './stock.js';
 import { notifyAll } from './notify.js';
 import { runCheckout } from './checkout.js';
-import { browserGetter } from './browser.js';
 import { CATALOG, targetLabel } from './settings.js';
 
 const CHECKOUT_RETRY_MS = 2 * 60 * 1000;
@@ -22,6 +22,8 @@ export class Bot extends EventEmitter {
     this.lastCheck = null;
     this.lastRows = [];
     this.lastError = null;
+    this.retryAt = 0;
+    this.waitingForHours = false;
     this.ordersPlaced = 0;
     this.orders = [];
     this.checkoutBusy = false;
@@ -43,6 +45,8 @@ export class Bot extends EventEmitter {
       running: this.running,
       lastCheck: this.lastCheck,
       lastError: this.lastError,
+      retryAt: this.retryAt,
+      waitingForHours: this.waitingForHours,
       parts: this.parts,
       rows: this.lastRows,
       ordersPlaced: this.ordersPlaced,
@@ -68,9 +72,7 @@ export class Bot extends EventEmitter {
     this.reset();
     this.settings = settings;
     this.secrets = secrets;
-    this.get = settings.check.useBrowser
-      ? browserGetter({ headless: settings.checkout.headless, browser: settings.checkout.browser })
-      : httpGet;
+    this.get = httpGet;
     this.running = true;
     this.log(`Started. Watching ${settings.targets.map(targetLabel).join(', ')} near ${settings.pickup.zip}. Mode: ${settings.checkout.mode}.`);
     this.emit('status');
@@ -96,8 +98,8 @@ export class Bot extends EventEmitter {
   schedule() {
     if (!this.running) return;
     const { intervalSec, jitterSec } = this.settings.check;
-    const ms = (Number(intervalSec) + Math.random() * Number(jitterSec || 0)) * 1000;
-    this.timer = setTimeout(() => this.tick(), ms);
+    const ms = (Math.max(60, Number(intervalSec) || 60) + Math.random() * Number(jitterSec || 0)) * 1000;
+    this.timer = setTimeout(() => this.tick(), Math.max(ms, this.retryAt - Date.now()));
   }
 
   async alert(subject, text) {
@@ -107,6 +109,13 @@ export class Bot extends EventEmitter {
 
   async tick() {
     if (!this.running) return;
+    if (!withinCheckingHours(this.settings.check)) {
+      this.waitingForHours = true;
+      this.emit('status');
+      this.timer = setTimeout(() => this.tick(), 60000);
+      return;
+    }
+    this.waitingForHours = false;
     try {
       if (!this.parts) {
         const { resolved, problems } = await resolveParts(this.settings.targets, this.get);
@@ -118,16 +127,20 @@ export class Bot extends EventEmitter {
       const rows = await checkStock(this.parts.map((t) => t.partNumber), this.settings.pickup, this.get);
       this.lastRows = rows;
       this.lastCheck = new Date().toISOString();
-      this.lastError = null;
+      this.lastError = rows.some((r) => r.status === 'unknown') ? 'Some inventory is unknown; see stock table' : null;
+      this.retryAt = 0;
       const available = rows.filter((r) => r.available);
       this.emit('status');
-      if (!available.length) {
+      if (!available.length && !this.lastError) {
         this.log(`No pickup stock at ${new Set(rows.map((r) => r.storeNumber)).size} stores`);
       } else {
         await this.onStock(available);
       }
     } catch (err) {
       this.lastError = err.message;
+      this.retryAt = err.retryAt || Date.now() + 300000;
+      this.lastRows = this.lastRows.map((r) => ({ ...r, status: 'unknown', available: null, quote: `Unknown: ${err.message}` }));
+      this.emit('status');
       this.log(`Check failed: ${err.message}`, 'error');
     }
     this.schedule();

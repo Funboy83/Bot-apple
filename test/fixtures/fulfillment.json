@@ -1,10 +1,58 @@
-{"head":{"status":"200"},"body":{"content":{"pickupMessage":{"stores":[
- {"storeNumber":"R075","storeName":"Valley Fair","city":"Santa Clara","state":"CA","storeDistanceWithUnit":"3.1 mi",
-  "partsAvailability":{"MAAA1LL/A":{"pickupDisplay":"available","pickupSearchQuote":"Available Today"},
-                       "MAAA2LL/A":{"pickupDisplay":"unavailable","pickupSearchQuote":"Unavailable for Pickup"}}},
- {"storeNumber":"R033","storeName":"Stanford","city":"Palo Alto","state":"CA","storeDistanceWithUnit":"12.4 mi",
-  "partsAvailability":{"MAAA1LL/A":{"pickupDisplay":"unavailable","messageTypes":{"regular":{"storePickupQuote":"Currently unavailable"}}},
-                       "MAAA2LL/A":{"pickupDisplay":"available","pickupSearchQuote":"Available Tomorrow"}}},
- {"storeNumber":"R999","storeName":"Far Away","storeDistanceWithUnit":"48 mi",
-  "partsAvailability":{"MAAA1LL/A":{"pickupDisplay":"available","pickupSearchQuote":"Available Today"}}}
-]}}}}
+{
+  "head": {
+    "status": "200"
+  },
+  "body": {
+    "stores": [
+      {
+        "storeNumber": "R075",
+        "storeName": "Valley Fair",
+        "city": "Santa Clara",
+        "state": "CA",
+        "storeDistanceWithUnit": "3.1 mi",
+        "partsAvailability": {
+          "MAAA1LL/A": {
+            "pickupDisplay": "available",
+            "pickupSearchQuote": "Available Today"
+          },
+          "MAAA2LL/A": {
+            "pickupDisplay": "unavailable",
+            "pickupSearchQuote": "Unavailable for Pickup"
+          }
+        }
+      },
+      {
+        "storeNumber": "R033",
+        "storeName": "Stanford",
+        "city": "Palo Alto",
+        "state": "CA",
+        "storeDistanceWithUnit": "12.4 mi",
+        "partsAvailability": {
+          "MAAA1LL/A": {
+            "pickupDisplay": "unavailable",
+            "messageTypes": {
+              "regular": {
+                "storePickupQuote": "Currently unavailable"
+              }
+            }
+          },
+          "MAAA2LL/A": {
+            "pickupDisplay": "available",
+            "pickupSearchQuote": "Available Tomorrow"
+          }
+        }
+      },
+      {
+        "storeNumber": "R999",
+        "storeName": "Far Away",
+        "storeDistanceWithUnit": "48 mi",
+        "partsAvailability": {
+          "MAAA1LL/A": {
+            "pickupDisplay": "available",
+            "pickupSearchQuote": "Available Today"
+          }
+        }
+      }
+    ]
+  }
+}

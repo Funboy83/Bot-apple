@@ -1,0 +1,78 @@
+{
+  "data": {
+    "products": [
+      {
+        "sku": "MK1F4",
+        "partNumber": "MK1F4LL/A",
+        "price": {
+          "fullPrice": 1999.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 256GB Night Sky"
+      },
+      {
+        "sku": "MK1H4",
+        "partNumber": "MK1H4LL/A",
+        "price": {
+          "fullPrice": 2199.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 512GB Night Sky"
+      },
+      {
+        "sku": "MK1G4",
+        "partNumber": "MK1G4LL/A",
+        "price": {
+          "fullPrice": 2199.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 512GB Star White"
+      },
+      {
+        "sku": "MK1E4",
+        "partNumber": "MK1E4LL/A",
+        "price": {
+          "fullPrice": 1999.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 256GB Star White"
+      },
+      {
+        "sku": "MK1L4",
+        "partNumber": "MK1L4LL/A",
+        "price": {
+          "fullPrice": 2599.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 1TB Night Sky"
+      },
+      {
+        "sku": "MK1Q4",
+        "partNumber": "MK1Q4LL/A",
+        "price": {
+          "fullPrice": 3199.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 2TB Star White"
+      },
+      {
+        "sku": "MK1J4",
+        "partNumber": "MK1J4LL/A",
+        "price": {
+          "fullPrice": 2599.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 1TB Star White"
+      },
+      {
+        "sku": "MK1R4",
+        "partNumber": "MK1R4LL/A",
+        "price": {
+          "fullPrice": 3199.0
+        },
+        "category": "iphone",
+        "name": "iPhone Duo 2TB Night Sky"
+      }
+    ]
+  }
+}

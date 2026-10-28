@@ -16,7 +16,6 @@ export async function getBrowser(opts = {}) {
     headless: !!opts.headless,
     viewport: { width: 1280, height: 900 },
     locale: 'en-US',
-    args: ['--disable-blink-features=AutomationControlled'],
   };
   launching = (async () => {
     try {
@@ -50,19 +49,6 @@ export async function newPage(opts) {
   return ctx.newPage();
 }
 
-// Fetches a URL from inside apple.com, so it carries the browser's cookies and fingerprint.
-export function browserGetter(opts) {
-  let page = null;
-  return async (url) => {
-    if (!page || page.isClosed()) {
-      page = await newPage(opts);
-      await page.goto('https://www.apple.com/shop/buy-iphone', { waitUntil: 'domcontentloaded' });
-    }
-    const { status, text } = await page.evaluate(async (u) => {
-      const r = await fetch(u, { credentials: 'include' });
-      return { status: r.status, text: await r.text() };
-    }, url);
-    if (status >= 400) throw new Error(`Apple returned HTTP ${status} in the browser`);
-    return text;
-  };
-}
+// Legacy callers use the same ordinary HTTP getter and cooldown.
+export function browserGetter() { return httpGet; }
+import { httpGet } from './stock.js';

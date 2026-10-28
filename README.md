@@ -24,12 +24,12 @@ from cloud servers, and your card details and Apple sign-in stay on your machine
    number blank and the bot looks it up on apple.com.
 2. **Store pickup.** Your ZIP code and how far you'll drive. You can limit it to specific
    stores by store number (shown in the Stock table after a check).
-3. **Checking.** How often to check (60 seconds is a sensible default; checking too often
+3. **Checking.** How often to check (five minutes is the default; checking too often
    can get you blocked).
 4. **Checkout mode:**
    - *Alert only*: just tells you.
    - *Stop before Place Order*: fills in everything and waits for you to press Place Order.
-     **Use this for your first test.**
+     **Use Alert only for pickup notifications.**
    - *Buy fully automatically*: presses Place Order for you, then stops after the number of
      orders you set.
    - *Guest* or *Apple ID*: for Apple ID, press **Open bot browser**, sign in once and
@@ -57,8 +57,10 @@ Press **Check stock now** to confirm it can see Apple's stock, then **Start bot*
 - **Apple changes its pages.** The checkout steps match on visible text, so small
   changes are fine, but a redesign can break a step. Test with *Stop before Place Order*
   first, and watch the Activity log.
-- **Bot checks.** If "Check stock now" fails with a bot-check message, tick *Check stock in a
-  real browser*.
+- **Blocked checks.** HTTP 403/541 pauses checks for at least an hour. Other failures use
+  increasing delays from 5 minutes to one hour and respect longer Retry-After values.
+  Manual checks share the same cooldown. Successful inventory checks are at least 60 seconds apart.
+  Failed or missing availability is **unknown**, never out of stock. Do not repeatedly refresh.
 - **Your card's bank may ask for a verification code** on a large purchase. The bot can't
   answer that; leave the bot window visible so you can.
 - Apple limits iPhones per customer, and may cancel orders it thinks were placed by bots.
@@ -74,3 +76,29 @@ npm start
 ```
 
 Add future models in `CATALOG` in `src/settings.js`.
+
+## Inventory source and limits
+
+The inventory adapter now uses `/shop/retail/pickup-message`, with `body.stores`
+responses and `messageTypes.regular`. This is a community-observed website endpoint,
+not a verified Apple-supported public API or a guarantee of permitted automation or US availability.
+On October 27, 2026, one ordinary US lookup for MK1F4LL/A near ZIP 95014 returned HTTP 200 and 12 store records, which this parser read successfully. This does not guarantee future access. If access is refused, let the cooldown
+expire and use Apple's website manually; there is no browser, CAPTCHA, header-spoofing,
+or proxy fallback. Cooldowns are in memory and reset when the server restarts; do not restart
+to evade a cooldown. Unknown stock never triggers a stock alert or checkout.
+
+References: [hteen issue 131](https://github.com/hteen/apple-store-helper/issues/131)
+and [Apple Pickup Watcher](https://github.com/ENCHIGO/apple-pickup-watcher).
+The parser and cooldown changes here are independently implemented; no GPL source was copied.
+
+## Scheduled pickup alerts
+
+Choose your model (including iPhone Duo), storage, color, ZIP, and stores in settings.
+Select **Alert only**, configure Telegram, email, or text, and use **Send test** to verify
+that your notification channel works. Enable **Only check during these hours each day**,
+choose the start/end and time zone, then press **Start bot**. Overnight windows work.
+The default interval is five minutes. Keep the computer awake and the app running;
+the phone does not need to stay open. Saved existing settings remain in place.
+Manual **Check stock now** can run outside the hours but shares the same cooldown.
+Only confirmed available inventory triggers a stock alert. Live notification delivery
+requires your own channel credentials and has not been tested with your account.

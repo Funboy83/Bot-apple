@@ -7,7 +7,7 @@ import { Vault } from './vault.js';
 import { Bot } from './bot.js';
 import { notifyAll } from './notify.js';
 import { resolveParts, checkStock, httpGet } from './stock.js';
-import { browserGetter, newPage, closeBrowser } from './browser.js';
+import { newPage, closeBrowser } from './browser.js';
 import fs from 'node:fs';
 
 const PORT = Number(process.env.PORT) || 3777;
@@ -122,7 +122,7 @@ app.post('/api/alerts/test', wrap(async (req) => {
 app.post('/api/check-now', wrap(async () => {
   const s = loadSettings();
   if (!s.pickup.zip) throw Object.assign(new Error('Enter a pickup ZIP code first'), { status: 400 });
-  const get = s.check.useBrowser ? browserGetter({ headless: s.checkout.headless, browser: s.checkout.browser }) : httpGet;
+  const get = httpGet;
   const { resolved, problems } = await resolveParts(s.targets, get);
   const rows = resolved.length ? await checkStock(resolved.map((t) => t.partNumber), s.pickup, get) : [];
   return { parts: resolved, problems, rows };
