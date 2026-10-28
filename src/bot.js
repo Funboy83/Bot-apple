@@ -3,10 +3,9 @@ import { withinCheckingHours } from './schedule.js';
 import { EventEmitter } from 'node:events';
 import { resolveParts, checkStock, httpGet } from './stock.js';
 import { notifyAll } from './notify.js';
-import { runCheckout } from './checkout.js';
+import { runCheckout, prepareCheckout } from './checkout.js';
 import { CATALOG, targetLabel } from './settings.js';
 
-const CHECKOUT_RETRY_MS = 2 * 60 * 1000;
 
 export class Bot extends EventEmitter {
   constructor() {
@@ -14,11 +13,13 @@ export class Bot extends EventEmitter {
     this.running = false;
     this.timer = null;
     this.logs = [];
+    this.runCheckout = runCheckout;
     this.reset();
   }
 
   reset() {
     this.parts = null;
+    this.preparationStarted = false;
     this.lastCheck = null;
     this.lastRows = [];
     this.lastError = null;
@@ -98,7 +99,7 @@ export class Bot extends EventEmitter {
   schedule() {
     if (!this.running) return;
     const { intervalSec, jitterSec } = this.settings.check;
-    const ms = (Math.max(60, Number(intervalSec) || 60) + Math.random() * Number(jitterSec || 0)) * 1000;
+    const ms = (Math.max(30, Number(intervalSec) || 300) + Math.random() * Number(jitterSec || 0)) * 1000;
     this.timer = setTimeout(() => this.tick(), Math.max(ms, this.retryAt - Date.now()));
   }
 
@@ -123,6 +124,12 @@ export class Bot extends EventEmitter {
         if (!resolved.length) throw new Error('No part numbers to check');
         this.parts = resolved;
         this.log(`Part numbers: ${resolved.map((t) => `${targetLabel(t)} = ${t.partNumber}`).join('; ')}`);
+      }
+      if (this.settings.checkout.mode !== 'alert-only' && !this.preparationStarted) {
+        this.preparationStarted = true;
+        prepareCheckout({ target: this.parts[0], settings: this.settings }).catch((error) => {
+          this.log(`Browser preparation failed: ${error.message}`, 'warn');
+        });
       }
       const rows = await checkStock(this.parts.map((t) => t.partNumber), this.settings.pickup, this.get);
       this.lastRows = rows;
@@ -167,7 +174,7 @@ export class Bot extends EventEmitter {
       this.alerted.set(key, Date.now());
       const model = CATALOG[pick.target.model];
       const link = `https://www.apple.com/shop/buy-iphone/${model?.page || ''}`;
-      await this.alert(`In stock: ${label}`, `Pickup at ${where}.\n${link}`);
+      void this.alert(`In stock: ${label}`, `Pickup at ${where}.\n${link}`).catch((error) => this.log(`Alert failed: ${error.message}`, 'warn'));
     }
 
     const mode = this.settings.checkout.mode;
@@ -177,7 +184,7 @@ export class Bot extends EventEmitter {
     this.checkoutBusy = true;
     this.emit('status');
     try {
-      const result = await runCheckout({
+      const result = await this.runCheckout({
         target: pick.target,
         store: pick.store,
         settings: this.settings,
@@ -198,9 +205,10 @@ export class Bot extends EventEmitter {
         this.awaitingYou = `${label} at ${pick.store.storeName}`;
       }
     } catch (err) {
-      this.nextCheckoutAt = Date.now() + CHECKOUT_RETRY_MS;
-      this.log(`Checkout failed at "${err.step || 'unknown'}": ${err.message}. Screenshot: ${err.screenshot || 'none'}. Retrying in 2 minutes.`, 'error');
-      await this.alert(`Checkout failed: ${label}`, `Stopped at "${err.step || 'checkout'}". It's still in stock at ${pick.store.storeName}, buy it by hand now: https://www.apple.com/shop/bag`);
+      this.awaitingYou = `Checkout stopped: ${err.message}. Review before resuming.`;
+      this.nextCheckoutAt = Infinity;
+      this.log(`Checkout failed at "${err.step || 'unknown'}": ${err.message}. Screenshot: ${err.screenshot || 'none'}. Stopped for review; no automatic checkout retry.`, 'error');
+      await this.alert(`Checkout failed: ${label}`, `Stopped at "${err.step || 'checkout'}". Stock or pickup windows may have changed at ${pick.store.storeName}. Check manually: https://www.apple.com/shop/bag`);
     } finally {
       this.checkoutBusy = false;
       this.emit('status');

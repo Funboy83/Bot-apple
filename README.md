@@ -59,7 +59,7 @@ Press **Check stock now** to confirm it can see Apple's stock, then **Start bot*
   first, and watch the Activity log.
 - **Blocked checks.** HTTP 403/541 pauses checks for at least an hour. Other failures use
   increasing delays from 5 minutes to one hour and respect longer Retry-After values.
-  Manual checks share the same cooldown. Successful inventory checks are at least 60 seconds apart.
+  Manual checks share the same cooldown. Successful inventory checks are at least 30 seconds apart.
   Failed or missing availability is **unknown**, never out of stock. Do not repeatedly refresh.
 - **Your card's bank may ask for a verification code** on a large purchase. The bot can't
   answer that; leave the bot window visible so you can.
@@ -102,3 +102,21 @@ the phone does not need to stay open. Saved existing settings remain in place.
 Manual **Check stock now** can run outside the hours but shares the same cooldown.
 Only confirmed available inventory triggers a stock alert. Live notification delivery
 requires your own channel credentials and has not been tested with your account.
+
+A 30-second interval is available for short checking windows, but Apple publishes no verified safe polling rate. It can still miss short restocks and may be blocked. Checks stop and back off on refused access.
+
+## Checkout preparation and timing
+
+For checkout modes, the bot prepares the first product choice in advance without adding
+it to the bag. Once inventory is confirmed, checkout proceeds independently of alert
+delivery. Fields are filled directly, product choices use standard keyboard interaction,
+and each checkout stage logs its duration. The ready time is measured from Add to Bag,
+not from browser preparation. An empty pickup-window list stops checkout before payment.
+A failed checkout requires review and Resume; it is not retried automatically.
+HTTP 403/429/541 navigation responses stop automation immediately.
+
+On October 27, 2026, the updated practice checkout reached final review in about
+0.8–0.9 seconds from Add to Bag with a prepared product. This is an offline test, not a
+live Apple speed guarantee. A live automated Chrome test was refused with HTTP 541 at
+Add to Bag; therefore live checkout timing and successful purchase remain unverified.
+No real order was submitted by these tests.

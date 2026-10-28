@@ -30,7 +30,7 @@ export function createInventoryGetter({ fetcher = fetch, now = Date.now } = {}) 
         parseAvailability(data, [...new URL(url).searchParams].filter(([k]) => k.startsWith('parts.')).map(([, v]) => v));
       }
       failures = 0;
-      nextAt = new URL(url).pathname.endsWith('/pickup-message') ? now() + 60000 : 0;
+      nextAt = new URL(url).pathname.endsWith('/pickup-message') ? now() + 30000 : 0;
       return text;
     } catch (err) {
       failures++;

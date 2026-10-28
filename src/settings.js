@@ -92,7 +92,8 @@ export function validate(s) {
     if (m && !m.colors.includes(t.color)) errors.push(`Choice ${i + 1}: ${m.label} has no ${t.color}`);
   }
   if (s.pickup.zip && !/^\d{5}$/.test(String(s.pickup.zip))) errors.push('ZIP code must be 5 digits');
-  if (!(Number(s.check.intervalSec) >= 60)) errors.push('Check interval must be at least 60 seconds');
+  if ((s.pickup.storeNumbers || []).some((n) => !/^R\d{3}$/.test(String(n)))) errors.push('Store numbers must look like R033; enter your ZIP in the ZIP field instead');
+  if (!(Number(s.check.intervalSec) >= 30)) errors.push('Check interval must be at least 30 seconds');
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.check.startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(s.check.endTime)) errors.push('Checking hours must use HH:MM');
   if (s.check.scheduleEnabled && s.check.startTime === s.check.endTime) errors.push('Choose different start and end times, or turn scheduled hours off');
   try { new Intl.DateTimeFormat('en-US', { timeZone: s.check.timeZone }); } catch { errors.push('Choose a valid time zone'); }

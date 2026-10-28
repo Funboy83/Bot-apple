@@ -51,3 +51,16 @@ test('outside configured hours the watch loop makes no request', async () => {
   bot.get = async () => assert.fail('must not query outside hours');
   try { await bot.tick(); assert.equal(bot.waitingForHours, true); } finally { clearTimeout(bot.timer); }
 });
+
+
+test('slow notification delivery does not delay checkout', async () => {
+  const bot = botWith(response('available'));
+  bot.settings.checkout.mode = 'stop-before-order';
+  bot.preparationStarted = true;
+  bot.alert = () => new Promise(() => {});
+  let called = false;
+  bot.runCheckout = async () => { called = true; return { placed: false }; };
+  await bot.tick();
+  assert.equal(called, true);
+  assert.ok(bot.awaitingYou);
+});

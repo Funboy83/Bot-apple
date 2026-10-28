@@ -1,3 +1,7 @@
 node_modules/
 # Your settings, encrypted card details and browser sign-in. Never commit these.
 data/
+
+# Local test profiles and generated artifacts
+work/
+outputs/
