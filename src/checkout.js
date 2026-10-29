@@ -24,7 +24,7 @@ async function firstVisible(locators, timeout) {
       const el = loc.filter({ visible: true }).first();
       if (await el.count().catch(() => 0)) return el;
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 50));
   }
   return null;
 }
@@ -38,7 +38,17 @@ async function choose(page, pattern, { timeout = 8000, roles = ['radio', 'button
   await el.scrollIntoViewIfNeeded().catch(() => {});
   if ((await el.getAttribute('aria-checked').catch(() => null)) === 'true') return true;
   if (await el.isChecked().catch(() => false)) return true;
-  await el.click({ timeout: 5000 }).catch(async () => el.click({ force: true, timeout: 5000 }));
+  if (await el.evaluate((node) => node.matches('input[type="radio"]'))) {
+    // Use the control's normal keyboard interaction, not its decorative overlay.
+    const deadline = Date.now() + timeout;
+    while (!await el.isEnabled()) {
+      if (Date.now() >= deadline) throw new Error('Product option remains disabled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await el.press('Space');
+  } else {
+    await el.click({ timeout: 10000 });
+  }
   return true;
 }
 
@@ -50,143 +60,188 @@ async function fill(page, pattern, value, { timeout = 4000 } = {}) {
   if (tag === 'select') {
     await el.selectOption({ label: String(value) }).catch(() => el.selectOption(String(value)));
   } else {
-    await el.fill('');
-    await el.pressSequentially(String(value), { delay: 20 });
+    await el.fill(String(value));
+    await el.press('Tab');
   }
   return true;
 }
 
-export async function runCheckout({ target, store, settings, secrets, log, onNeedsYou }) {
+const prepared = new Map();
+const targetKey = (target) => JSON.stringify([target.model, target.capacity, target.color, target.partNumber]);
+
+async function configureProduct(page, target) {
   const model = CATALOG[target.model];
+  if (!model) throw new Error('Select a known model before checkout');
+  await page.goto(`${APPLE}/shop/buy-iphone/${model.page}`, { waitUntil: 'domcontentloaded' });
+  const picks = [
+    ...(target.model === 'iphone-duo' ? [] : [target.model.endsWith('pro-max') ? /iPhone\s+18\s+Pro\s+Max/i : /iPhone\s+18\s+Pro(?!\s+Max)/i]),
+    new RegExp(`^\\s*${esc(target.color)}\\b`, 'i'),
+    new RegExp(`^\\s*${esc(target.capacity).replace('GB', '\\s?GB').replace('TB', '\\s?TB')}`, 'i'),
+    /No trade.?in/i, /^(Buy|Pay in full|One.?time payment|Full price)/i,
+    /Connect.*(own|later)|^Unlocked|SIM.?free/i, /No AppleCare/i,
+  ];
+  for (const pattern of picks) {
+    if (!(await choose(page, pattern, { timeout: 10000, roles: ['radio'] }))) throw new Error(`Product choice not found: ${pattern}`);
+  }
+  await page.getByRole('button', { name: /^Add to Bag$/i }).waitFor({ state: 'visible', timeout: 10000 });
+  return page;
+}
+
+// Prepare selections before a stock event. This never adds an item or starts checkout.
+export function prepareCheckout({ target, settings }) {
+  const key = targetKey(target);
+  if (!prepared.has(key)) {
+    const promise = (async () => {
+      const page = await newPage({ headless: settings.checkout.headless, browser: settings.checkout.browser });
+      try { return await configureProduct(page, target); }
+      catch (error) { await page.close().catch(() => {}); throw error; }
+    })();
+    prepared.set(key, { promise, createdAt: Date.now() });
+    promise.catch(() => prepared.delete(key));
+  }
+  return prepared.get(key).promise;
+}
+
+export async function runCheckout({ target, store, settings, secrets, log = () => {}, onNeedsYou }) {
   const mode = settings.checkout.mode;
   const shotsDir = path.join(DATA_DIR, 'screenshots');
   fs.mkdirSync(shotsDir, { recursive: true });
-  const page = await newPage({ headless: settings.checkout.headless, browser: settings.checkout.browser });
-  page.setDefaultTimeout(15000);
-
-  let step = 'start';
+  const startedAt = performance.now();
+  const timings = [];
+  let refuse;
+  const accessRefused = new Promise((_, reject) => { refuse = reject; });
+  accessRefused.catch(() => {});
+  let page;
+  let bagStartedAt;
+  let step = 'prepare product';
   const must = async (name, fn) => {
     step = name;
+    const begin = performance.now();
     log(`Checkout: ${name}`);
-    const ok = await fn();
+    const ok = await Promise.race([fn(), accessRefused]);
     if (ok === false) throw new Error('could not find it on the page');
+    const durationMs = Math.round(performance.now() - begin);
+    timings.push({ step: name, durationMs });
+    log(`Checkout timing: ${name}: ${durationMs} ms`);
   };
-
   try {
-    await must('open the product page', async () => {
-      await page.goto(`${APPLE}/shop/buy-iphone/${model?.page || 'iphone'}`, { waitUntil: 'domcontentloaded' });
-    });
-
-    if (model) {
-      // Apple reveals these one at a time; loop until Add to Bag is clickable.
-      const picks = [
-        [target.model.endsWith('pro-max') ? /Pro Max/i : /iPhone \d+ Pro(?! Max)/i],
-        [new RegExp(`^\\s*${esc(target.color)}\\b`, 'i'), new RegExp(`\\b${esc(target.color)}\\b`, 'i')],
-        [new RegExp(`^\\s*${esc(target.capacity).replace('GB', '\\s?GB').replace('TB', '\\s?TB')}`, 'i')],
-        [/No trade.?in/i],
-        [/^(Buy|Pay in full|One.?time payment|Full price)/i],
-        [/Connect.*(own|later)|^Unlocked|SIM.?free/i],
-        [/No AppleCare/i],
-      ];
-      step = 'choose model, color and storage';
-      log(`Checkout: ${step}`);
-      for (let round = 0; round < 3; round++) {
-        for (const patterns of picks) {
-          for (const p of patterns) {
-            if (await choose(page, p, { timeout: round === 0 ? 4000 : 1500, roles: ['radio'] })) break;
+    await must('prepare product', async () => {
+      const key = targetKey(target);
+      const entry = prepared.get(key);
+      if (entry && Date.now() - entry.createdAt > 10 * 60000) {
+        prepared.delete(key);
+        entry.promise.then((p) => p.close()).catch(() => {});
+      }
+      page = await prepareCheckout({ target, settings });
+      prepared.delete(key);
+      if (page.isClosed()) page = await prepareCheckout({ target, settings });
+      prepared.delete(key);
+      page.setDefaultTimeout(10000);
+      page.on('response', (response) => {
+        if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) {
+          log(`Checkout page: ${new URL(response.url()).pathname} HTTP ${response.status()}`);
+          if ([403, 429, 541].includes(response.status())) {
+            const error = new Error(`Apple refused checkout with HTTP ${response.status()}; automation stopped`);
+            error.statusCode = response.status();
+            refuse(error);
           }
         }
-        const add = page.getByRole('button', { name: /Add to Bag/i }).filter({ visible: true }).first();
-        if ((await add.count()) && (await add.isEnabled())) break;
-      }
-      await must('add to bag', () => choose(page, /Add to Bag/i, { timeout: 10000, roles: ['button'] }));
-      await page.waitForLoadState('domcontentloaded');
-    }
-
+      });
+    });
+    bagStartedAt = performance.now();
+    await must('add to bag', () => choose(page, /^Add to Bag$/i, { timeout: 10000, roles: ['button'] }));
     await must('open the bag', async () => {
-      await page.goto(`${APPLE}/shop/bag`, { waitUntil: 'domcontentloaded' });
+      const review = page.getByRole('button', { name: /^Review Bag$/i });
+      await Promise.race([
+        review.waitFor({ state: 'visible', timeout: 10000 }),
+        page.getByRole('button', { name: /^Check ?Out$/i }).first().waitFor({ state: 'visible', timeout: 10000 }),
+      ]);
+      if (await review.isVisible()) await review.click();
     });
     await must('check out', () => choose(page, /^Check ?Out$/i, { roles: ['button', 'link'] }));
-
-    step = 'sign in';
     if (settings.checkout.account === 'guest') {
       await must('continue as guest', () => choose(page, /Continue as Guest|Guest Checkout/i, { timeout: 20000, roles: ['button', 'link'] }));
     } else {
-      log('Checkout: waiting for your Apple ID session (sign in once with "Open bot browser" if this stalls)');
-      const signedIn = await firstVisible([page.getByRole('radio', { name: /pick it up/i }), page.getByText(/pick it up/i)], 60000);
-      if (!signedIn) {
-        onNeedsYou?.('Apple is asking you to sign in. Sign in in the bot window within 5 minutes.');
-        const later = await firstVisible([page.getByText(/pick it up/i)], 5 * 60000);
-        if (!later) throw new Error('not signed in to Apple ID');
+      await must('wait for signed-in checkout', async () => {
+        const pickup = page.getByRole('radio', { name: /pick it up/i });
+        await pickup.waitFor({ state: 'visible', timeout: 60000 });
+      });
+    }
+    await must('choose store pickup', () => choose(page, /I.?ll pick it up/i, { timeout: 20000, roles: ['radio'] }));
+    await must('choose pickup store', async () => {
+      const storePattern = new RegExp(esc(store.storeName.replace(/^Apple\s+/i, '')), 'i');
+      const storeRadio = page.getByRole('radio', { name: storePattern }).first();
+      const zipInput = page.getByRole('textbox', { name: /ZIP|Zip Code|City|Location/i }).first();
+      // Wait for either existing stores or a ZIP entry form, not an absent optional input.
+      await Promise.race([
+        storeRadio.waitFor({ state: 'visible', timeout: 10000 }),
+        zipInput.waitFor({ state: 'visible', timeout: 10000 }),
+        page.getByRole('button', { name: /Edit Zip Code or City/i }).waitFor({ state: 'visible', timeout: 10000 }),
+      ]);
+      if (!await storeRadio.isVisible()) {
+        if (!await zipInput.isVisible()) await page.getByRole('button', { name: /Edit Zip Code or City/i }).click();
+        await zipInput.fill(String(settings.pickup.zip));
+        await zipInput.press('Enter');
       }
-    }
-
-    await must('choose store pickup', () => choose(page, /I.?ll pick it up|Pick( it)? ?up/i, { timeout: 20000 }));
-    step = 'find the store';
-    if (await fill(page, /ZIP|Zip Code|City|Location/i, settings.pickup.zip, { timeout: 5000 })) {
-      await page.keyboard.press('Enter');
-    }
-    const storePattern = new RegExp(esc(store.storeName.replace(/^Apple\s+/i, '')), 'i');
-    await must(`choose ${store.storeName}`, () => choose(page, storePattern, { timeout: 15000, roles: ['radio', 'button'] }));
-
-    step = 'choose pickup time';
-    const time = await firstVisible([page.getByRole('combobox', { name: /time|window/i }), page.locator('select')], 5000);
-    if (time) {
+      return choose(page, storePattern, { timeout: 15000, roles: ['radio'] });
+    });
+    await must('choose pickup time', async () => {
+      const time = page.getByRole('combobox', { name: /time|window/i }).first();
+      await time.waitFor({ state: 'visible', timeout: 10000 });
       const values = await time.locator('option').evaluateAll((opts) => opts.filter((o) => o.value && !o.disabled).map((o) => o.value));
-      if (values.length) await time.selectOption(values[0]);
-    }
-    await must('continue to pickup details', () => choose(page, /Continue to Pickup Details|^Continue/i, { roles: ['button'] }));
-
+      if (!values.length) throw new Error('No pickup windows are available');
+      await time.selectOption(values[0]);
+    });
+    await must('continue to pickup details', () => choose(page, /Continue to Pickup Details/i, { roles: ['button'] }));
     const c = secrets.contact || {};
     const p = settings.checkout.pickupBySomeoneElse ? secrets.pickupPerson || {} : c;
-    step = 'fill pickup details';
-    log(`Checkout: ${step}`);
-    if (settings.checkout.pickupBySomeoneElse) await choose(page, /someone else/i, { timeout: 4000 });
-    await fill(page, /First Name/i, p.firstName);
-    await fill(page, /Last Name/i, p.lastName);
-    await fill(page, /Email/i, c.email || p.email);
-    await fill(page, /Phone/i, p.phone || c.phone);
-    await must('continue to payment', () => choose(page, /Continue to Payment|^Continue/i, { roles: ['button'] }));
-
-    const card = secrets.card || {};
-    const bill = secrets.billing || {};
-    step = 'fill payment';
-    log(`Checkout: ${step}`);
-    await choose(page, /Credit or Debit Card|Credit\/Debit/i, { timeout: 8000 });
-    if (!(await fill(page, /Card Number/i, card.number, { timeout: 10000 }))) throw new Error('card number field not found');
-    const exp = `${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`;
-    await fill(page, /Expiration|MM\s*\/\s*YY/i, exp);
-    await fill(page, /CVV|Security Code|CVC/i, card.cvv);
-    await fill(page, /First Name/i, bill.firstName || c.firstName);
-    await fill(page, /Last Name/i, bill.lastName || c.lastName);
-    await fill(page, /Street Address|Address Line 1/i, bill.street);
-    await fill(page, /Apt|Suite|Address Line 2/i, bill.street2);
-    await fill(page, /ZIP/i, bill.zip);
-    await fill(page, /City/i, bill.city);
-    await fill(page, /State/i, bill.state);
-    await fill(page, /Phone/i, bill.phone || c.phone);
-    await must('continue to review', () => choose(page, /Continue to Review|Review Order|^Continue/i, { roles: ['button'] }));
-
-    const place = await firstVisible([page.getByRole('button', { name: /Place (Your )?Order/i })], 20000);
-    if (!place) throw new Error('Place Order button never appeared');
-
+    await must('fill pickup details', async () => {
+      if (settings.checkout.pickupBySomeoneElse) await choose(page, /someone else/i);
+      for (const [pattern, value] of [[/First Name/i,p.firstName],[/Last Name/i,p.lastName],[/Email/i,c.email || p.email],[/Phone/i,p.phone || c.phone]]) {
+        if (!await fill(page, pattern, value)) throw new Error(`Missing pickup field: ${pattern}`);
+      }
+    });
+    await must('continue to payment', () => choose(page, /Continue to Payment/i, { roles: ['button'] }));
+    await must('fill payment', async () => {
+      if (!await choose(page, /Credit or Debit Card|Credit\/Debit/i)) throw new Error('Card payment option not found');
+      const card = secrets.card || {}, bill = secrets.billing || {};
+      const exp = `${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`;
+      for (const [pattern,value] of [[/Card Number/i,card.number],[/Expiration|MM\s*\/\s*YY/i,exp],[/CVV|Security Code|CVC/i,card.cvv],[/First Name/i,bill.firstName || c.firstName],[/Last Name/i,bill.lastName || c.lastName],[/Street Address|Address Line 1/i,bill.street],[/ZIP/i,bill.zip]]) {
+        if (!await fill(page,pattern,value)) throw new Error(`Missing payment field: ${pattern}`);
+      }
+      // Optional fields: only touch those actually rendered. Apple may derive City/State from ZIP.
+      for (const [pattern,value] of [[/Apt|Suite|Apartment|Address Line 2/i,bill.street2],[/^City$/i,bill.city],[/^State$/i,bill.state],[/Phone/i,bill.phone || c.phone]]) {
+        if (!value) continue;
+        const field = page.getByLabel(pattern).first();
+        if (await field.isVisible()) await fill(page,pattern,value,{ timeout: 500 });
+      }
+    });
+    await must('continue to review', () => choose(page, /Continue to Review|Review Order|^Continue$/i, { roles: ['button'] }));
+    await must('verify final review', async () => {
+      await page.getByRole('button', { name: /Place (Your )?Order/i }).waitFor({ state: 'visible', timeout: 20000 });
+    });
+    const readyMs = Math.round(performance.now() - bagStartedAt);
+    const totalMs = Math.round(performance.now() - startedAt);
+    log(`Checkout ready: ${readyMs} ms from Add to Bag`);
     if (mode !== 'full-auto') {
-      step = 'waiting for you';
-      onNeedsYou?.(`Everything is filled in for ${store.storeName}. Press Place Order in the bot window to buy.`);
-      return { placed: false, page };
+      onNeedsYou?.(`Everything is filled in for ${store.storeName}. Ready in ${readyMs} ms. Press Place Order in the bot window to buy.`);
+      return { placed: false, page, readyMs, totalMs, timings };
     }
-
     await must('place order', async () => {
-      await place.click();
+      await page.getByRole('button', { name: /Place (Your )?Order/i }).click();
       const done = await firstVisible([page.getByText(/Thank you|Your order number|order is placed/i)], 60000);
       return !!done;
     });
     const body = await page.textContent('body').catch(() => '');
-    const orderNumber = body.match(/\bW\d{8,}\b/)?.[0] || null;
-    return { placed: true, orderNumber, page };
+    return { placed: true, orderNumber: body.match(/\bW\d{8,}\b/)?.[0] || null, page, readyMs, totalMs, timings };
   } catch (err) {
     const file = path.join(shotsDir, `failed-${Date.now()}.png`);
-    await page.screenshot({ path: file, fullPage: true }).catch(() => {});
-    throw new CheckoutError(step, err.message, file);
+    if (page) await page.screenshot({ path: file, fullPage: true }).catch(() => {});
+    const error = new CheckoutError(step, err.message, file);
+    error.retryable = false; // Checkout needs fresh stock and human review after a failed attempt.
+    error.timings = timings;
+    error.url = page?.url();
+    error.statusCode = err.statusCode;
+    throw error;
   }
 }

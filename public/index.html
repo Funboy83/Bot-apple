@@ -10,7 +10,7 @@
 <header class="top">
   <div>
     <h1>Bot Apple</h1>
-    <p class="muted">Watches Apple Store pickup stock and buys it for you.</p>
+    <p class="muted">Watches Apple Store pickup stock and alerts you when it is available.</p>
   </div>
   <div class="controls">
     <span id="runState" class="pill">Stopped</span>
@@ -25,7 +25,7 @@
 <main>
   <section class="card" id="sec-targets">
     <h2>1. What to buy</h2>
-    <p class="muted">Top choice first. The bot buys the first one it finds in stock. Unlocked only. Leave part number blank and the bot finds it on apple.com.</p>
+    <p class="muted">Top choice first. The bot alerts you when a choice is available. Unlocked only. Leave part number blank and the bot finds it on apple.com.</p>
     <table class="targets">
       <thead><tr><th>#</th><th>Model</th><th>Storage</th><th>Color</th><th>Part number (optional)</th><th></th></tr></thead>
       <tbody id="targets"></tbody>
@@ -46,9 +46,14 @@
   <section class="card">
     <h2>3. Checking</h2>
     <div class="grid">
-      <label>Check every (seconds) <input name="settings.check.intervalSec" type="number" min="20"></label>
+      <label>Check every (seconds) <input name="settings.check.intervalSec" type="number" min="30"></label>
       <label>Plus random extra (seconds) <input name="settings.check.jitterSec" type="number" min="0"></label>
-      <label class="check wide"><input type="checkbox" name="settings.check.useBrowser"> Check stock in a real browser (turn on if Apple blocks the checks)</label>
+      <label class="check wide"><input type="checkbox" name="settings.check.scheduleEnabled"> Only check during these hours each day</label>
+      <label>Start time <input name="settings.check.startTime" type="time"></label>
+      <label>End time <input name="settings.check.endTime" type="time"></label>
+      <label>Time zone <input name="settings.check.timeZone" placeholder="America/Los_Angeles"></label>
+      <p class="wide">Five minutes between checks is the default. Overnight hours are supported. Keep this computer awake and the bot running to receive alerts. “Check stock now” makes one manual check, even outside these hours.</p>
+      <p>Stock checks use ordinary HTTP requests. Blocked checks show unknown and pause before retrying.</p>
     </div>
   </section>
 

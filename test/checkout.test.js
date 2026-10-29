@@ -7,7 +7,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 process.env.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-apple-'));
-const { runCheckout } = await import('../src/checkout.js');
+const { runCheckout, prepareCheckout } = await import('../src/checkout.js');
 const { getBrowser, closeBrowser } = await import('../src/browser.js');
 const { PAGES } = await import('./fixtures/mock-store.js');
 const { DEFAULT_SETTINGS } = await import('../src/settings.js');
@@ -21,15 +21,18 @@ const secrets = {
   billing: { street: '1 Infinite Loop', zip: '95014', city: 'Cupertino', state: 'CA' },
 };
 
-async function run(mode) {
+async function run(mode, options = {}) {
   const ctx = await getBrowser({ headless: true, browser: 'chromium' });
   await ctx.route('https://www.apple.com/**', (route) => {
-    const html = PAGES[new URL(route.request().url()).pathname];
+    let html = PAGES[new URL(route.request().url()).pathname];
+    if (options.blocked && new URL(route.request().url()).pathname === '/shop/bag') return route.fulfill({ status: 541, body: '<h1>Access refused</h1>' });
+    if (options.noWindows && html) html = html.replace('<option value="t1">Today 5-5:15 PM</option>', '');
     return html ? route.fulfill({ contentType: 'text/html', body: html }) : route.fulfill({ status: 404, body: 'nope' });
   });
   const settings = structuredClone(DEFAULT_SETTINGS);
   settings.pickup.zip = '95014';
   settings.checkout = { ...settings.checkout, mode, headless: true, browser: 'chromium' };
+  if (options.prepared) await prepareCheckout({ target: { model: 'iphone-18-pro-max', capacity: '1TB', color: 'Glacier', partNumber: 'MAAA1LL/A' }, settings });
   const needs = [];
   const result = await runCheckout({
     target: { model: 'iphone-18-pro-max', capacity: '1TB', color: 'Glacier', partNumber: 'MAAA1LL/A' },
@@ -66,4 +69,21 @@ test('stop-before-order fills everything but leaves Place Order for you', { skip
   assert.match(result.page.url(), /review$/);
   assert.equal(needs.length, 1);
   await result.page.close();
+});
+
+
+test('prepared checkout measures from Add to Bag through final review', { skip: !hasBrowser }, async () => {
+  const { result } = await run('stop-before-order', { prepared: true });
+  assert.ok(result.readyMs > 0);
+  assert.ok(result.timings.some((t) => t.step === 'choose pickup time'));
+  console.log(`PRACTICE Add to Bag -> review: ${result.readyMs} ms`);
+  await result.page.close();
+});
+test('no pickup windows aborts before payment or order submission', { skip: !hasBrowser }, async () => {
+  await assert.rejects(run('stop-before-order', { noWindows: true }), /No pickup windows/);
+});
+
+
+test('541 during checkout stops immediately instead of waiting for missing controls', { skip: !hasBrowser }, async () => {
+  await assert.rejects(run('stop-before-order', { blocked: true }), (error) => error.statusCode === 541 && /automation stopped/.test(error.message));
 });

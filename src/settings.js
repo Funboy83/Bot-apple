@@ -6,6 +6,11 @@ export const DATA_DIR = process.env.BOT_DATA_DIR || path.resolve('data');
 
 // Models the settings page offers. Add a new model here when Apple releases one.
 export const CATALOG = {
+  'iphone-duo': {
+    label: 'iPhone Duo', page: 'iphone-duo', screen: '',
+    capacities: ['256GB', '512GB', '1TB', '2TB'],
+    colors: ['Night Sky', 'Star White'],
+  },
   'iphone-18-pro-max': {
     label: 'iPhone 18 Pro Max',
     page: 'iphone-18-pro',
@@ -24,7 +29,7 @@ export const CATALOG = {
 
 export const DEFAULT_SETTINGS = {
   // Checked in order; the first one in stock is bought.
-  targets: [{ model: 'iphone-18-pro-max', capacity: '1TB', color: 'Silver', partNumber: '' }],
+  targets: [{ model: 'iphone-duo', capacity: '256GB', color: 'Night Sky', partNumber: '' }],
   carrier: 'unlocked',
   pickup: {
     zip: '',
@@ -33,10 +38,12 @@ export const DEFAULT_SETTINGS = {
     storeNumbers: [],
   },
   check: {
-    intervalSec: 60,
+    intervalSec: 300,
     jitterSec: 15,
-    // Run stock checks inside a real browser if Apple blocks plain requests.
-    useBrowser: false,
+    scheduleEnabled: false,
+    startTime: '08:00',
+    endTime: '22:00',
+    timeZone: 'America/Los_Angeles',
   },
   alerts: {
     telegram: false,
@@ -48,7 +55,7 @@ export const DEFAULT_SETTINGS = {
   checkout: {
     // 'alert-only': only notify. 'stop-before-order': fill everything, wait for you to press Place Order.
     // 'full-auto': press Place Order automatically.
-    mode: 'stop-before-order',
+    mode: 'alert-only',
     account: 'guest', // 'guest' or 'apple-id' (sign in once in the bot's browser)
     headless: false,
     browser: 'chrome', // 'chrome' uses your installed Google Chrome, 'chromium' uses Playwright's
@@ -85,7 +92,12 @@ export function validate(s) {
     if (m && !m.colors.includes(t.color)) errors.push(`Choice ${i + 1}: ${m.label} has no ${t.color}`);
   }
   if (s.pickup.zip && !/^\d{5}$/.test(String(s.pickup.zip))) errors.push('ZIP code must be 5 digits');
-  if (!(Number(s.check.intervalSec) >= 20)) errors.push('Check interval must be at least 20 seconds');
+  if ((s.pickup.storeNumbers || []).some((n) => !/^R\d{3}$/.test(String(n)))) errors.push('Store numbers must look like R033; enter your ZIP in the ZIP field instead');
+  if (!(Number(s.check.intervalSec) >= 30)) errors.push('Check interval must be at least 30 seconds');
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.check.startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(s.check.endTime)) errors.push('Checking hours must use HH:MM');
+  if (s.check.scheduleEnabled && s.check.startTime === s.check.endTime) errors.push('Choose different start and end times, or turn scheduled hours off');
+  try { new Intl.DateTimeFormat('en-US', { timeZone: s.check.timeZone }); } catch { errors.push('Choose a valid time zone'); }
+  if (!(Number(s.check.jitterSec) >= 0)) errors.push('Extra seconds cannot be negative');
   if (!['alert-only', 'stop-before-order', 'full-auto'].includes(s.checkout.mode)) errors.push('Unknown checkout mode');
   if (!['guest', 'apple-id'].includes(s.checkout.account)) errors.push('Unknown account type');
   return errors;

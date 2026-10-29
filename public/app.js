@@ -89,13 +89,13 @@ function readTargets() {
 
 function renderStatus(st) {
   state.status = st;
-  $('#runState').textContent = st.running ? (st.checkoutBusy ? 'Checking out…' : 'Watching') : 'Stopped';
+  $('#runState').textContent = st.running ? (st.checkoutBusy ? 'Checking out…' : st.waitingForHours ? 'Waiting for checking hours' : 'Watching') : 'Stopped';
   $('#runState').classList.toggle('on', st.running);
   $('#startStop').textContent = st.running ? 'Stop bot' : 'Start bot';
   $('#resume').hidden = !st.awaitingYou;
   const banner = st.awaitingYou
     ? `Ready to buy ${st.awaitingYou}. Press Place Order in the bot's browser window, then press Resume if you want it to keep going.`
-    : st.lastError ? `Last check failed: ${st.lastError}` : '';
+    : st.lastError ? `Inventory unknown: ${st.lastError}${st.retryAt ? `. Next check after ${new Date(st.retryAt).toLocaleTimeString()}` : ''}` : '';
   $('#banner').hidden = !banner;
   $('#banner').textContent = banner;
   if (st.lastCheck) $('#lastCheck').textContent = `Last checked ${new Date(st.lastCheck).toLocaleTimeString()}.`;
@@ -108,7 +108,7 @@ function renderRows(rows) {
   if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="muted">No results yet.</td></tr>'; return; }
   [...rows].sort((a, b) => (b.available - a.available) || ((a.distance ?? 999) - (b.distance ?? 999))).forEach((r) => {
     const tr = document.createElement('tr');
-    [`${r.storeName}${r.city ? `, ${r.city}` : ''} (${r.storeNumber})`, r.distance ?? '', r.part, r.quote || (r.available ? 'Available' : 'Unavailable')]
+    [`${r.storeName}${r.city ? `, ${r.city}` : ''} (${r.storeNumber})`, r.distance ?? '', r.part, r.quote || (r.available === null ? 'Unknown' : r.available ? 'Available' : 'Unavailable')]
       .forEach((v, i) => { const td = document.createElement('td'); td.textContent = v; if (i === 3 && r.available) td.className = 'yes'; tr.append(td); });
     body.append(tr);
   });
@@ -193,7 +193,11 @@ $('#checkNow').onclick = async () => {
     renderRows(r.rows);
     $('#lastCheck').textContent = `Checked ${new Date().toLocaleTimeString()}. ${r.parts.map((p) => `${p.capacity} ${p.color} = ${p.partNumber}`).join(', ')}`;
     r.problems.forEach((p) => addLog({ at: new Date().toISOString(), level: 'warn', msg: p }));
-  } catch (e) { alert(e.message); }
+  } catch (e) {
+    renderRows([]);
+    $('#banner').hidden = false;
+    $('#banner').textContent = `Inventory unknown: ${e.message}`;
+  }
   btn.disabled = false; btn.textContent = 'Check stock now';
 };
 
